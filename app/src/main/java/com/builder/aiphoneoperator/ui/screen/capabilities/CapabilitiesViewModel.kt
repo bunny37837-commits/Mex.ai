@@ -3,14 +3,15 @@ package com.builder.aiphoneoperator.ui.screen.capabilities
 import androidx.lifecycle.ViewModel
 
 class CapabilitiesViewModel : ViewModel() {
-    val state = CapabilitiesUiState()
+    val state = CapabilitiesUiState(
+        title = "Capabilities",
+        capabilities = listOf(
+            "Open installed apps by name",
+        )
+    )
 }
 
 data class CapabilitiesUiState(
-    val title: String = "Capabilities",
-    val capabilities: List<String> = listOf(
-        "Accessibility-first control surface",
-        "Foreground service runtime shell",
-        "Local-first architecture",
-    ),
+    val title: String,
+    val capabilities: List<String>,
 )

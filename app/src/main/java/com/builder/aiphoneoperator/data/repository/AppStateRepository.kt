@@ -17,7 +17,7 @@ interface AppStateRepository {
     fun setAccessibilityEvent(event: AccessibilityEvent?)
     fun setForegroundRunning(running: Boolean)
 
-    fun startTask(command: String = "Runtime control shell")
+    fun submitCommand(command: String)
     fun pauseTask()
     fun stopTask()
     fun cancelTask()

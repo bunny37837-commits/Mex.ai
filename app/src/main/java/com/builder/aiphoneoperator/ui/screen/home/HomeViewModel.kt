@@ -10,12 +10,12 @@ class HomeViewModel : ViewModel() {
     val state = HomeUiState()
 
     fun onCommandSubmitted(command: String) {
-        OperatorRepository.startTask(command)
+        OperatorRepository.submitCommand(command)
     }
 }
 
 data class HomeUiState(
-    val title: String = "AI Phone Operator",
-    val summary: String = "Local-first operator shell with accessibility-first foundations.",
-    val status: String = "Runtime foundation active",
+    val title: String = "AI Phone Agent",
+    val summary: String = "Current real capability: open installed apps by name.",
+    val status: String = "Agent core active",
 )

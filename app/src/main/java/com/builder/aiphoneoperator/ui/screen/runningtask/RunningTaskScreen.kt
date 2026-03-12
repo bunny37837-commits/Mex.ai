@@ -8,10 +8,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import com.builder.aiphoneoperator.runtime.OperatorAppState
-import com.builder.aiphoneoperator.runtime.RuntimeControlState
 import com.builder.aiphoneoperator.ui.components.BackTextButton
 import com.builder.aiphoneoperator.ui.components.OperatorScaffold
-import com.builder.aiphoneoperator.ui.components.StepTimeline
 import com.builder.aiphoneoperator.ui.theme.AiPhoneOperatorTheme
 
 @Composable
@@ -23,17 +21,21 @@ fun RunningTaskScreen(
     onCancel: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val runtimeTask = appState.runningTask
+    val session = appState.activeSession
     OperatorScaffold(
         title = state.title,
         navigationIcon = { BackTextButton(onClick = onBack) },
     ) {
         Text(state.summary)
-        Text("Command: ${runtimeTask.command}")
-        Text("Control state: ${runtimeTask.controlState.name.lowercase()}")
-        Text("Task state: ${runtimeTask.taskState.name.lowercase()}")
-        StepTimeline(steps = runtimeTask.steps)
-        Button(onClick = onPause, enabled = runtimeTask.controlState == RuntimeControlState.RUNNING) { Text("Pause") }
+        if (session == null) {
+            Text("No active agent session.")
+        } else {
+            Text("Command: ${session.commandText}")
+            Text("Status: ${session.status.name.lowercase()}")
+            Text("Message: ${session.message}")
+            if (session.error != null) Text("Error: ${session.error}")
+        }
+        Button(onClick = onPause) { Text("Pause") }
         Button(onClick = onStop) { Text("Stop") }
         Button(onClick = onCancel) { Text("Cancel") }
     }

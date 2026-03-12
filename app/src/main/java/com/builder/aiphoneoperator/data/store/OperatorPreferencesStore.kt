@@ -17,6 +17,9 @@ data class OperatorPreferences(
     val hyperOsAutostartAcknowledged: Boolean = false,
     val onboardingCompletionSnapshot: Boolean = false,
     val safetyLockEnabled: Boolean = false,
+    val localAiOnly: Boolean = true,
+    val conversationMemoryEnabled: Boolean = false,
+    val debugModeEnabled: Boolean = false,
     val lastServiceRunning: Boolean = false,
     val lastAccessibilityConnected: Boolean = false,
     val lastRuntimeCommand: String = "",
@@ -29,6 +32,9 @@ class OperatorPreferencesStore(private val context: Context) {
         val hyperOsAutostartAcknowledged = booleanPreferencesKey("hyperos_autostart_acknowledged")
         val onboardingCompletionSnapshot = booleanPreferencesKey("onboarding_completion_snapshot")
         val safetyLockEnabled = booleanPreferencesKey("safety_lock_enabled")
+        val localAiOnly = booleanPreferencesKey("local_ai_only")
+        val conversationMemoryEnabled = booleanPreferencesKey("conversation_memory_enabled")
+        val debugModeEnabled = booleanPreferencesKey("debug_mode_enabled")
         val lastServiceRunning = booleanPreferencesKey("last_service_running")
         val lastAccessibilityConnected = booleanPreferencesKey("last_accessibility_connected")
         val lastRuntimeCommand = stringPreferencesKey("last_runtime_command")
@@ -41,6 +47,9 @@ class OperatorPreferencesStore(private val context: Context) {
             hyperOsAutostartAcknowledged = prefs[Keys.hyperOsAutostartAcknowledged] ?: false,
             onboardingCompletionSnapshot = prefs[Keys.onboardingCompletionSnapshot] ?: false,
             safetyLockEnabled = prefs[Keys.safetyLockEnabled] ?: false,
+            localAiOnly = prefs[Keys.localAiOnly] ?: true,
+            conversationMemoryEnabled = prefs[Keys.conversationMemoryEnabled] ?: false,
+            debugModeEnabled = prefs[Keys.debugModeEnabled] ?: false,
             lastServiceRunning = prefs[Keys.lastServiceRunning] ?: false,
             lastAccessibilityConnected = prefs[Keys.lastAccessibilityConnected] ?: false,
             lastRuntimeCommand = prefs[Keys.lastRuntimeCommand] ?: "",
@@ -52,6 +61,9 @@ class OperatorPreferencesStore(private val context: Context) {
     suspend fun setHyperOsAutostartAcknowledged(value: Boolean) = mutate { it.copy(hyperOsAutostartAcknowledged = value) }
     suspend fun setOnboardingCompletionSnapshot(value: Boolean) = mutate { it.copy(onboardingCompletionSnapshot = value) }
     suspend fun setSafetyLockEnabled(value: Boolean) = mutate { it.copy(safetyLockEnabled = value) }
+    suspend fun setLocalAiOnly(value: Boolean) = mutate { it.copy(localAiOnly = value) }
+    suspend fun setConversationMemoryEnabled(value: Boolean) = mutate { it.copy(conversationMemoryEnabled = value) }
+    suspend fun setDebugModeEnabled(value: Boolean) = mutate { it.copy(debugModeEnabled = value) }
 
     suspend fun setRuntimeMetadata(
         serviceRunning: Boolean,
@@ -78,6 +90,9 @@ class OperatorPreferencesStore(private val context: Context) {
         prefs[Keys.hyperOsAutostartAcknowledged] = value.hyperOsAutostartAcknowledged
         prefs[Keys.onboardingCompletionSnapshot] = value.onboardingCompletionSnapshot
         prefs[Keys.safetyLockEnabled] = value.safetyLockEnabled
+        prefs[Keys.localAiOnly] = value.localAiOnly
+        prefs[Keys.conversationMemoryEnabled] = value.conversationMemoryEnabled
+        prefs[Keys.debugModeEnabled] = value.debugModeEnabled
         prefs[Keys.lastServiceRunning] = value.lastServiceRunning
         prefs[Keys.lastAccessibilityConnected] = value.lastAccessibilityConnected
         prefs[Keys.lastRuntimeCommand] = value.lastRuntimeCommand

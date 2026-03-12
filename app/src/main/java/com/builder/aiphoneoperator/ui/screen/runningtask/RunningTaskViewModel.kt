@@ -27,6 +27,6 @@ class RunningTaskViewModel : ViewModel() {
 }
 
 data class RunningTaskUiState(
-    val title: String = "Running Task",
-    val summary: String = "Runtime controls are wired. Task execution is not implemented yet.",
+    val title: String = "Agent Session",
+    val summary: String = "Shows the real command/session lifecycle for the current executor.",
 )

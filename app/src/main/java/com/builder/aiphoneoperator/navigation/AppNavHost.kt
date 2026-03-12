@@ -75,10 +75,8 @@ fun AppNavHost(
             HomeScreen(
                 state = viewModel.state,
                 appState = appState,
-                onOpenRunningTask = {
-                    viewModel.onCommandSubmitted("Command submitted from Home")
-                    navController.navigate(AppDestination.RunningTask.route)
-                },
+                onSubmitCommand = viewModel::onCommandSubmitted,
+                onOpenRunningTask = { navController.navigate(AppDestination.RunningTask.route) },
                 onOpenSettings = { navController.navigate(AppDestination.Settings.route) },
                 onOpenServiceStatus = { navController.navigate(AppDestination.ServiceStatus.route) },
                 onOpenHistory = { navController.navigate(AppDestination.History.route) },
@@ -120,8 +118,13 @@ fun AppNavHost(
         }
         composable(AppDestination.Settings.route) {
             val viewModel: SettingsViewModel = viewModel()
+            val appState by viewModel.appState.collectAsState()
             SettingsScreen(
                 state = viewModel.state,
+                appState = appState,
+                onSetLocalAiOnly = viewModel::setLocalAiOnly,
+                onSetConversationMemoryEnabled = viewModel::setConversationMemoryEnabled,
+                onSetDebugModeEnabled = viewModel::setDebugModeEnabled,
                 onBack = { navController.popBackStack() },
             )
         }
@@ -138,8 +141,10 @@ fun AppNavHost(
         }
         composable(AppDestination.History.route) {
             val viewModel: HistoryViewModel = viewModel()
+            val appState by viewModel.appState.collectAsState()
             HistoryScreen(
                 state = viewModel.state,
+                appState = appState,
                 onBack = { navController.popBackStack() },
             )
         }
