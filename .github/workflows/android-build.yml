@@ -92,7 +92,24 @@ jobs:
               "java.base/",
               "sun.reflect",
               "org.jetbrains.kotlin.compilerRunner",
+              "org.gradle.internal",
+              "org.gradle.api.tasks",
+              "BuildExceptionReporter",
           ]
+
+          def normalize_path(path: str) -> str:
+              path = path.strip()
+              path = path.replace('file://', '')
+              path = path.replace('file:', '')
+              path = path.replace('\\', '/')
+              marker = '/app/src/'
+              idx = path.find(marker)
+              if idx != -1:
+                  return 'app/src/' + path[idx + len(marker):].lstrip('/')
+              idx2 = path.find('app/src/')
+              if idx2 != -1:
+                  return path[idx2:]
+              return path
 
           task = "Unknown"
           file_path = "Unknown"
@@ -100,6 +117,7 @@ jobs:
           exact_error = "No source-level compiler error found. Check full logs."
           cause = "unknown"
           source_log = "Unknown"
+          matched_lines = []
 
           task_patterns = [
               re.compile(r"> Task (:[^\s]+) FAILED"),
@@ -107,12 +125,18 @@ jobs:
           ]
 
           source_patterns = [
-              re.compile(r"^e:\s+(app/src/main/java/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
-              re.compile(r"^e:\s+(app/src/main/res/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
-              re.compile(r"^error:\s+(app/src/main/java/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
-              re.compile(r"^error:\s+(app/src/main/res/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
-              re.compile(r"^(app/src/main/java/[^:]+):(\d+):(?:(\d+):)?\s*error:\s*(.+)$"),
-              re.compile(r"^(app/src/main/res/[^:]+):(\d+):(?:(\d+):)?\s*error:\s*(.+)$"),
+              re.compile(r"^e:\s+file:///.+?/(app/src/main/java/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^e:\s+file:///.+?/(app/src/main/res/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^e:\s+/.+?/(app/src/main/java/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^e:\s+/.+?/(app/src/main/res/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^e:\s+(app/src/main/java/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^e:\s+(app/src/main/res/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^(app/src/main/java/[^:]+):(\d+):\s*error:\s*(.+)$"),
+              re.compile(r"^(app/src/main/res/[^:]+):\s*error:\s*(.+)$"),
+              re.compile(r"^error:\s+file:///.+?/(app/src/main/java/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^error:\s+/.+?/(app/src/main/java/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^error:\s+(app/src/main/java/[^:]+):(\d+):(\d+)\s+(.+)$"),
+              re.compile(r"^error:\s+(app/src/main/res/[^:]+)\s*:\s*(.+)$"),
           ]
 
           combined_texts = []
@@ -135,39 +159,92 @@ jobs:
                       continue
                   if any(fragment in line for fragment in ignore_fragments):
                       continue
+
                   for pattern in source_patterns:
                       m = pattern.match(line)
-                      if m:
-                          file_path = m.group(1)
-                          line_no = m.group(2)
-                          exact_error = m.group(4).strip()
+                      if not m:
+                          continue
+
+                      groups = m.groups()
+                      # patterns with file, line, col, message
+                      if len(groups) == 4:
+                          found_file, found_line, _found_col, found_error = groups
+                      # patterns with file, line, message
+                      elif len(groups) == 3:
+                          found_file, found_line, found_error = groups
+                      # patterns with file, message
+                      elif len(groups) == 2:
+                          found_file, found_error = groups
+                          found_line = "?"
+                      else:
+                          continue
+
+                      normalized = normalize_path(found_file)
+                      compact_line = f"{normalized}:{found_line}: {found_error.strip()}"
+                      matched_lines.append(compact_line)
+
+                      if source_log == "Unknown":
+                          file_path = normalized
+                          line_no = found_line
+                          exact_error = found_error.strip()
                           source_log = log_name
-                          break
-                  if source_log != "Unknown":
                       break
+
               if source_log != "Unknown":
+                  # keep scanning remaining lines for a few more matched compiler lines in same log
+                  for raw_line in text.splitlines():
+                      line = raw_line.strip()
+                      if any(fragment in line for fragment in ignore_fragments):
+                          continue
+                      for pattern in source_patterns:
+                          m = pattern.match(line)
+                          if not m:
+                              continue
+                          groups = m.groups()
+                          if len(groups) == 4:
+                              found_file, found_line, _found_col, found_error = groups
+                          elif len(groups) == 3:
+                              found_file, found_line, found_error = groups
+                          elif len(groups) == 2:
+                              found_file, found_error = groups
+                              found_line = "?"
+                          else:
+                              continue
+                          normalized = normalize_path(found_file)
+                          compact_line = f"{normalized}:{found_line}: {found_error.strip()}"
+                          if compact_line not in matched_lines:
+                              matched_lines.append(compact_line)
+                          if len(matched_lines) >= 5:
+                              break
+                      if len(matched_lines) >= 5:
+                          break
                   break
 
           all_text = "\n\n".join(text for _, text in combined_texts).lower()
-          if "manifest" in all_text or "androidmanifest.xml" in exact_error.lower() or "/res/" in file_path:
+          lower_error = exact_error.lower()
+          if "manifest" in all_text or "androidmanifest.xml" in lower_error or "/res/" in file_path:
               cause = "manifest/resources"
-          elif "@composable" in all_text or "compose" in all_text:
+          elif "unresolved reference" in lower_error or "no parameter with name" in lower_error or "cannot find a parameter" in lower_error or "type mismatch" in lower_error:
+              cause = "kotlin/compose"
+          elif "@composable" in all_text or "composable" in lower_error or "material3" in all_text or "compose" in all_text:
               cause = "compose"
-          elif "unresolved reference" in exact_error.lower() or "type mismatch" in exact_error.lower() or file_path.endswith(".kt"):
-              cause = "kotlin"
           elif "could not resolve" in all_text or "dependency" in all_text:
               cause = "dependency"
           elif "sdk location not found" in all_text:
               cause = "android sdk / environment"
+          elif file_path.endswith('.kt'):
+              cause = "kotlin"
 
           pathlib.Path("ci-logs").mkdir(parents=True, exist_ok=True)
           with open("ci-logs/first-real-error.txt", "w", encoding="utf-8") as f:
               f.write(f"Failing task: {task}\n")
-              f.write(f"File: {file_path}\n")
-              f.write(f"Line: {line_no}\n")
-              f.write(f"Error: {exact_error}\n")
-              f.write(f"Likely cause: {cause}\n")
-              f.write(f"Source log: {source_log}\n")
+              f.write(f"Exact file: {file_path}\n")
+              f.write(f"Line number: {line_no}\n")
+              f.write(f"Compiler error message: {exact_error}\n")
+              f.write(f"Likely category: {cause}\n")
+              f.write("First 5 matched compiler error lines:\n")
+              for item in matched_lines[:5]:
+                  f.write(f"- {item}\n")
 
           if file_path != "Unknown":
               safe_message = exact_error.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
@@ -181,12 +258,19 @@ jobs:
           summary.append(f"- Assemble debug: {os.environ.get('ASSEMBLE_OUTCOME', 'unknown')}")
           summary.append("")
           summary.append(f"- Failing task: `{task}`")
-          summary.append(f"- Exact file: `{file_path}`")
+          summary.append(f"- Exact normalized file path: `{file_path}`")
           summary.append(f"- Line number: `{line_no}`")
-          summary.append(f"- Likely cause category: `{cause}`")
+          summary.append(f"- Likely category: `{cause}`")
           summary.append("")
-          summary.append("### Exact error")
+          summary.append("### Exact compiler error")
           summary.append(exact_error)
+          summary.append("")
+          summary.append("### First 5 matched compiler error lines")
+          if matched_lines:
+              for item in matched_lines[:5]:
+                  summary.append(f"- `{item}`")
+          else:
+              summary.append("- No source-level compiler lines matched. Check `ci-logs/assemble-debug.log`.")
           summary.append("")
           summary.append("### Main debugging output")
           summary.append("- `ci-logs/first-real-error.txt`")
