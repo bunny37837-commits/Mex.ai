@@ -19,6 +19,7 @@ object SystemSettingsNavigator {
             } else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri(context))
             RepairRequirement.AUTOSTART -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri(context))
             RepairRequirement.AI_SERVICE_RUNNING -> Intent(context, com.builder.aiphoneoperator.MainActivity::class.java)
+            else -> Intent(context, com.builder.aiphoneoperator.MainActivity::class.java)
         }.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
         context.startActivity(intent)
     }

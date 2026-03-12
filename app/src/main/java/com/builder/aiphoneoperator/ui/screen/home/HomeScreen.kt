@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.builder.aiphoneoperator.ui.screen.home
 
 import androidx.compose.animation.AnimatedVisibility

@@ -31,6 +31,9 @@ object RequirementFixUseCase {
                     context.startService(intent)
                 }
             }
+            else -> {
+                // Safe fallback for future requirement states.
+            }
         }
         scope.launch {
             OperatorRepository.refreshStatuses(context.applicationContext)
