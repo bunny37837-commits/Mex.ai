@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
@@ -80,7 +81,12 @@ fun EmergencyControlsScreen(
                     EmergencyListItem("🚫", "Disable AI Operator", true) { showDisableDialog = true }
                 }
             }
-            ElevatedCard(shape = MaterialTheme.shapes.medium, containerColor = if (safetyLock) StatusRedDim else MaterialTheme.colorScheme.surfaceVariant) {
+            ElevatedCard(
+                shape = MaterialTheme.shapes.medium,
+                colors = CardDefaults.elevatedCardColors(
+                    containerColor = if (safetyLock) StatusRedDim else MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
                 androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                     Text(if (safetyLock) "🔒" else "🔓")
                     Text("Safety Lock", modifier = Modifier.weight(1f).padding(start = 8.dp))
