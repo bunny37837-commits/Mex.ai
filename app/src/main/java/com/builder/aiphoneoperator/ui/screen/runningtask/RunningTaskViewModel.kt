@@ -24,6 +24,22 @@ class RunningTaskViewModel : ViewModel() {
         OperatorRepository.cancelTask()
         RuntimeControlBus.cancel()
     }
+
+    fun captureObservation() {
+        OperatorRepository.captureObservation()
+    }
+
+    fun performBack() {
+        OperatorRepository.performBack()
+    }
+
+    fun tapTargetByText(query: String) {
+        OperatorRepository.tapTargetByText(query)
+    }
+
+    fun inputTextIntoFocusedField(text: String) {
+        OperatorRepository.inputTextIntoFocusedField(text)
+    }
 }
 
 data class RunningTaskUiState(

@@ -95,6 +95,10 @@ fun AppNavHost(
                 onPause = viewModel::onPause,
                 onStop = viewModel::onStop,
                 onCancel = viewModel::onCancel,
+                onCaptureObservation = viewModel::captureObservation,
+                onPerformBack = viewModel::performBack,
+                onTapTargetByText = viewModel::tapTargetByText,
+                onInputTextIntoFocusedField = viewModel::inputTextIntoFocusedField,
                 onBack = { navController.popBackStack() },
             )
         }

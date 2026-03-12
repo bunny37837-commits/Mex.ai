@@ -6,6 +6,7 @@ enum class AgentSessionStatus {
     UNSUPPORTED,
     RESOLVED,
     EXECUTING,
+    BLOCKED,
     COMPLETED,
     FAILED,
     CANCELLED,

@@ -3,6 +3,7 @@ package com.builder.aiphoneoperator.runtime
 import android.view.accessibility.AccessibilityEvent
 import com.builder.aiphoneoperator.domain.agent.AgentSession
 import com.builder.aiphoneoperator.domain.agent.AgentSessionStatus
+import com.builder.aiphoneoperator.domain.agent.ScreenObservation
 import com.builder.aiphoneoperator.model.RepairRequirement
 import com.builder.aiphoneoperator.model.RequirementStatus
 import com.builder.aiphoneoperator.model.SeverityLevel
@@ -55,6 +56,7 @@ data class OperatorAppState(
     val settings: HonestSettingsState = HonestSettingsState(),
     val accessibility: AccessibilityRuntimeState = AccessibilityRuntimeState(),
     val foreground: ForegroundRuntimeState = ForegroundRuntimeState(),
+    val currentObservation: ScreenObservation? = null,
     val activeSession: AgentSession? = null,
     val sessionHistory: List<AgentSession> = emptyList(),
 ) {
@@ -126,6 +128,7 @@ object AppRuntimeState {
     }
     fun setForegroundRunning(running: Boolean) = _state.update { it.copy(foreground = ForegroundRuntimeState(running)) }
 
+    fun setCurrentObservation(observation: ScreenObservation?) = _state.update { it.copy(currentObservation = observation) }
     fun setActiveSession(session: AgentSession) = _state.update { it.copy(activeSession = session) }
     fun updateActiveSession(transform: (AgentSession?) -> AgentSession?) = _state.update { current ->
         val updated = transform(current.activeSession)

@@ -3,13 +3,21 @@ package com.builder.aiphoneoperator.data.repository
 import android.content.Context
 import android.view.accessibility.AccessibilityEvent
 import com.builder.aiphoneoperator.data.store.OperatorPreferencesStore
+import com.builder.aiphoneoperator.domain.agent.AccessibilityActionExecutor
+import com.builder.aiphoneoperator.domain.agent.AccessibilityGroundingEngine
+import com.builder.aiphoneoperator.domain.agent.AccessibilityObservationProvider
 import com.builder.aiphoneoperator.domain.agent.AgentCommand
 import com.builder.aiphoneoperator.domain.agent.AgentSession
 import com.builder.aiphoneoperator.domain.agent.AgentSessionStatus
+import com.builder.aiphoneoperator.domain.agent.BlockerType
 import com.builder.aiphoneoperator.domain.agent.CommandParser
+import com.builder.aiphoneoperator.domain.agent.DeviceAction
+import com.builder.aiphoneoperator.domain.agent.ExecutionAction
 import com.builder.aiphoneoperator.domain.agent.ExecutionResult
 import com.builder.aiphoneoperator.domain.agent.OpenAppExecutor
 import com.builder.aiphoneoperator.domain.agent.OpenAppResolver
+import com.builder.aiphoneoperator.domain.agent.PostActionVerifier
+import com.builder.aiphoneoperator.domain.agent.ScreenObservation
 import com.builder.aiphoneoperator.domain.status.AndroidOnboardingStatusChecker
 import com.builder.aiphoneoperator.domain.status.AndroidRepairStatusChecker
 import com.builder.aiphoneoperator.model.RequirementStatus
@@ -74,6 +82,92 @@ object OperatorRepository : AppStateRepository {
         persistRuntimeMetadata()
     }
 
+    override fun captureObservation(): ScreenObservation? {
+        val observation = AccessibilityObservationProvider.capture()
+        AppRuntimeState.setCurrentObservation(observation)
+        return observation
+    }
+
+    override fun tapTargetByText(query: String): Boolean {
+        val before = captureObservation()
+        val blocked = before?.blockers?.firstOrNull()
+        if (blocked != null && blocked.type != BlockerType.KEYBOARD_OBSTRUCTION) {
+            AppRuntimeState.updateActiveSession { session ->
+                session?.copy(status = AgentSessionStatus.BLOCKED, message = blocked.message, error = blocked.message)
+            }
+            return false
+        }
+        val observation = before ?: return false
+        val target = AccessibilityGroundingEngine.findTarget(observation, query) ?: return false
+        AppRuntimeState.updateActiveSession { session ->
+            session?.copy(status = AgentSessionStatus.EXECUTING, message = "Tapping '${target.label}'.")
+        }
+        val executed = AccessibilityActionExecutor.execute(DeviceAction.Tap(target))
+        val after = captureObservation()
+        val verification = PostActionVerifier.verifyTap(before, after, target)
+        AppRuntimeState.updateActiveSession { session ->
+            session?.copy(
+                status = when (verification.outcome) {
+                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS -> AgentSessionStatus.COMPLETED
+                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.NO_EFFECT -> AgentSessionStatus.FAILED
+                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.WRONG_STATE -> AgentSessionStatus.FAILED
+                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.FAILURE -> AgentSessionStatus.FAILED
+                },
+                message = verification.message,
+                error = if (executed) null else "Tap execution failed",
+            )
+        }
+        return executed && verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS
+    }
+
+    override fun inputTextIntoFocusedField(text: String): Boolean {
+        val before = captureObservation() ?: return false
+        val focused = before.nodes.firstOrNull { it.focused && it.editable }
+            ?: before.nodes.firstOrNull { it.editable }
+            ?: return false
+        val target = AccessibilityGroundingEngine.findTarget(before, focused.text ?: focused.contentDescription ?: focused.id, requireEditable = true)
+            ?: com.builder.aiphoneoperator.domain.agent.GroundedTarget(
+                id = focused.id,
+                label = focused.text ?: focused.contentDescription ?: "focused field",
+                bounds = focused.bounds,
+                source = com.builder.aiphoneoperator.domain.agent.GroundingSource.ACCESSIBILITY,
+                affordances = setOf(com.builder.aiphoneoperator.domain.agent.TargetAffordance.INPUT_TEXT),
+                confidence = 0.95f,
+            )
+        AppRuntimeState.updateActiveSession { session ->
+            session?.copy(status = AgentSessionStatus.EXECUTING, message = "Typing into focused field.")
+        }
+        val executed = AccessibilityActionExecutor.execute(DeviceAction.InputText(target, text))
+        val after = captureObservation()
+        val verification = PostActionVerifier.verifyInput(after, target, text)
+        AppRuntimeState.updateActiveSession { session ->
+            session?.copy(
+                status = if (verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS) AgentSessionStatus.COMPLETED else AgentSessionStatus.FAILED,
+                message = verification.message,
+                error = if (executed) null else "Text input execution failed",
+            )
+        }
+        return executed && verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS
+    }
+
+    override fun performBack(): Boolean {
+        val before = captureObservation()
+        AppRuntimeState.updateActiveSession { session ->
+            session?.copy(status = AgentSessionStatus.EXECUTING, message = "Navigating back.")
+        }
+        val executed = AccessibilityActionExecutor.execute(DeviceAction.Back)
+        val after = captureObservation()
+        val verification = PostActionVerifier.verifyBack(before, after)
+        AppRuntimeState.updateActiveSession { session ->
+            session?.copy(
+                status = if (verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS) AgentSessionStatus.COMPLETED else AgentSessionStatus.FAILED,
+                message = verification.message,
+                error = if (executed) null else "Back execution failed",
+            )
+        }
+        return executed && verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS
+    }
+
     override fun submitCommand(command: String) {
         val context = appContext ?: return
         val now = System.currentTimeMillis()
@@ -102,7 +196,7 @@ object OperatorRepository : AppStateRepository {
         }
 
         val resolved = when (action) {
-            is com.builder.aiphoneoperator.domain.agent.ExecutionAction.OpenApp -> OpenAppResolver.resolve(context, action.query)
+            is ExecutionAction.OpenApp -> OpenAppResolver.resolve(context, action.query)
         }
         if (resolved == null) {
             val failed = parsing.copy(
