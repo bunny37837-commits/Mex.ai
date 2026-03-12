@@ -3,14 +3,19 @@
 package com.builder.aiphoneoperator.ui.screen.home
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -18,7 +23,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -42,10 +47,10 @@ fun HomeScreen(
     onOpenEmergencyControls: () -> Unit,
     onOpenRepairMode: () -> Unit,
 ) {
-    var commandText by remember { mutableStateOf("") }
-    var voiceState by remember { mutableStateOf(VoiceState.IDLE) }
-    val activeSession = appState.activeSession
-    val systemStatus = appState.toSystemStatusUiState()
+    var commandText by rememberSaveable { mutableStateOf("") }
+    var voiceState by rememberSaveable { mutableStateOf(VoiceState.IDLE) }
+    val session = appState.activeSession
+    val system = appState.toSystemStatusUiState()
 
     Scaffold(
         topBar = {
@@ -60,8 +65,9 @@ fun HomeScreen(
                 voiceState = voiceState,
                 onTextChange = { commandText = it },
                 onSend = {
-                    if (commandText.isNotBlank()) {
-                        onSubmitCommand(commandText)
+                    val trimmed = commandText.trim()
+                    if (trimmed.isNotEmpty()) {
+                        onSubmitCommand(trimmed)
                         commandText = ""
                         onOpenRunningTask()
                     }
@@ -71,40 +77,119 @@ fun HomeScreen(
                 }
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = MaterialTheme.colorScheme.background,
     ) { innerPadding ->
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(top = innerPadding.calculateTopPadding() + 16.dp, bottom = innerPadding.calculateBottomPadding() + 24.dp, start = 16.dp, end = 16.dp)
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = innerPadding.calculateTopPadding() + 12.dp,
+                bottom = innerPadding.calculateBottomPadding() + 16.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { Text(state.summary) }
-            item { Text("Real capability: open installed apps by name") }
-            item { Text("Accessibility: ${if (systemStatus.accessibilityOn) "connected" else "not connected"}") }
-            item { Text("Service: ${systemStatus.serviceState.name.lowercase()}") }
-            item { Text("Privacy mode: ${if (appState.settings.localAiOnly) "Local-only" else "Mixed future mode"}") }
-            item { Text("Conversation memory: ${appState.settings.conversationMemoryEnabled}") }
-            item { Text("Debug mode: ${appState.settings.debugModeEnabled}") }
             item {
-                Button(onClick = onOpenCapabilities, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                    Text("View current capabilities")
-                }
-            }
-            item {
-                Button(onClick = onOpenHistory, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                    Text("View real session history")
-                }
-            }
-            item {
-                Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                    Text("Open settings")
-                }
-            }
-            item {
-                Text(
-                    text = if (activeSession == null) "No active session. Try: open whatsapp" else "Active session: ${activeSession.status.name.lowercase()} · ${activeSession.message}",
-                    modifier = Modifier.padding(top = 8.dp)
+                AgentStatusCard(
+                    title = state.summary,
+                    capability = "Open installed apps by name",
+                    accessibility = if (system.accessibilityOn) "Connected" else "Disconnected",
+                    service = system.serviceState.name.lowercase().replaceFirstChar { it.uppercase() },
                 )
             }
+            item {
+                SessionCard(
+                    title = if (session == null) "No active session" else "Current session",
+                    body = when {
+                        session == null -> "Try commands like ‘open whatsapp’ or ‘launch camera’."
+                        session.error != null -> "${session.message}\n${session.error}"
+                        else -> session.message
+                    },
+                    footer = session?.status?.name?.lowercase()?.replace('_', ' ') ?: "idle",
+                    onOpen = onOpenRunningTask,
+                )
+            }
+            item {
+                QuickActionsSection(
+                    onOpenCapabilities = onOpenCapabilities,
+                    onOpenHistory = onOpenHistory,
+                    onOpenSettings = onOpenSettings,
+                    onOpenServiceStatus = onOpenServiceStatus,
+                    onOpenRepairMode = onOpenRepairMode,
+                    onOpenEmergencyControls = onOpenEmergencyControls,
+                )
+            }
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Current truth", style = MaterialTheme.typography.titleMedium)
+                        Text("• API integration is not implemented yet")
+                        Text("• Local model loading is not implemented yet")
+                        Text("• Memory screen is not yet backed by real knowledge storage")
+                        OutlinedButton(onClick = onOpenMemory, modifier = Modifier.fillMaxWidth()) {
+                            Text("Open memory surface")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentStatusCard(
+    title: String,
+    capability: String,
+    accessibility: String,
+    service: String,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text("Capability: $capability")
+            Text("Accessibility: $accessibility")
+            Text("Service: $service")
+        }
+    }
+}
+
+@Composable
+private fun SessionCard(
+    title: String,
+    body: String,
+    footer: String,
+    onOpen: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(body, style = MaterialTheme.typography.bodyMedium)
+            Text("State: $footer", style = MaterialTheme.typography.labelMedium)
+            Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+                Text("Open session")
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickActionsSection(
+    onOpenCapabilities: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenServiceStatus: () -> Unit,
+    onOpenRepairMode: () -> Unit,
+    onOpenEmergencyControls: () -> Unit,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Agent tools", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = onOpenCapabilities, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Capabilities") }
+            OutlinedButton(onClick = onOpenHistory, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("History") }
+            OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Settings") }
+            OutlinedButton(onClick = onOpenServiceStatus, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Service status") }
+            OutlinedButton(onClick = onOpenRepairMode, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Repair mode") }
+            OutlinedButton(onClick = onOpenEmergencyControls, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Emergency controls") }
         }
     }
 }
