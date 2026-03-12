@@ -7,5 +7,4 @@
     android:canRequestFilterKeyEvents="false"
     android:canRequestTouchExplorationMode="false"
     android:description="@string/operator_accessibility_description"
-    android:notificationTimeout="100"
-    android:settingsActivity="" />
+    android:notificationTimeout="100" />

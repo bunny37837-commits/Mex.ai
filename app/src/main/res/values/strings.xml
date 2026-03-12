@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">AI Phone Operator</string>
     <string name="operator_accessibility_description">Accessibility bridge for local phone operator automation.</string>
+    <string name="operator_accessibility_service_label">AI Phone Operator Accessibility</string>
     <string name="notification_channel_name">Operator service</string>
     <string name="notification_channel_description">Foreground service for phone operator runtime.</string>
 </resources>
