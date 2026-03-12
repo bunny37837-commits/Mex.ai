@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      GRADLE_ARGS: --stacktrace --info --warning-mode all
+      GRADLE_ARGS: --console=plain --stacktrace --warning-mode all
 
     steps:
       - name: Checkout
@@ -42,8 +42,7 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Prepare diagnostics directories
-        run: |
-          mkdir -p ci-logs diagnostics
+        run: mkdir -p ci-logs diagnostics
 
       - name: Run lint
         id: lint
@@ -69,113 +68,141 @@ jobs:
           ./gradlew assembleDebug $GRADLE_ARGS 2>&1 | tee ci-logs/assemble-debug.log
           exit ${PIPESTATUS[0]}
 
-      - name: Extract failure diagnostics
+      - name: Extract first real source-level error
         if: always()
         shell: bash
+        env:
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          TEST_OUTCOME: ${{ steps.unit_tests.outcome }}
+          ASSEMBLE_OUTCOME: ${{ steps.assemble_debug.outcome }}
         run: |
           python3 <<'PY'
-          import os, re, glob, pathlib
+          import os, re, pathlib
 
-          log_files = [
+          logs = [
               ("lint", "ci-logs/lint.log"),
               ("unit_tests", "ci-logs/unit-tests.log"),
               ("assemble_debug", "ci-logs/assemble-debug.log"),
           ]
 
-          existing = [(name, path) for name, path in log_files if os.path.exists(path)]
-          combined = []
-          for name, path in existing:
-              try:
-                  with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                      combined.append((name, f.read()))
-              except Exception:
-                  pass
+          ignore_fragments = [
+              "GradleCompilerRunnerWithWorkers.kt",
+              "TaskExecutionException",
+              "org.gradle.",
+              "java.base/",
+              "sun.reflect",
+              "org.jetbrains.kotlin.compilerRunner",
+          ]
 
-          all_text = "\n\n".join(text for _, text in combined)
-
-          failing_task = "Unknown"
-          module_or_file = "Unknown"
-          reason = "No specific error extracted. Check attached logs."
-          possible_cause = "Unknown"
+          task = "Unknown"
+          file_path = "Unknown"
+          line_no = "?"
+          exact_error = "No source-level compiler error found. Check full logs."
+          cause = "unknown"
           source_log = "Unknown"
 
-          task_matches = re.findall(r"> Task (:[^\s]+) FAILED", all_text)
-          if task_matches:
-              failing_task = task_matches[-1]
-          else:
-              task_matches = re.findall(r"Execution failed for task '([^']+)'", all_text)
-              if task_matches:
-                  failing_task = task_matches[-1]
-
-          path_matches = re.findall(r"file:///[^\s)]+|[\w./-]+\.kt(?::\d+)?|[\w./-]+\.kts(?::\d+)?|AndroidManifest\.xml", all_text)
-          if path_matches:
-              module_or_file = path_matches[-1]
-
-          reason_patterns = [
-              r"\* What went wrong:\s*(.+?)(?:\n\* Try:|\Z)",
-              r"e: (.+)",
-              r"error: (.+)",
-              r"Caused by: (.+)",
+          task_patterns = [
+              re.compile(r"> Task (:[^\s]+) FAILED"),
+              re.compile(r"Execution failed for task '([^']+)'")
           ]
-          for pattern in reason_patterns:
-              m = re.search(pattern, all_text, re.S)
-              if m:
-                  reason = " ".join(m.group(1).strip().split())[:1200]
+
+          source_patterns = [
+              re.compile(r"^e:\s+(app/src/main/java/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
+              re.compile(r"^e:\s+(app/src/main/res/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
+              re.compile(r"^error:\s+(app/src/main/java/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
+              re.compile(r"^error:\s+(app/src/main/res/[^:]+):(\d+):(?:(\d+):)?\s*(.+)$"),
+              re.compile(r"^(app/src/main/java/[^:]+):(\d+):(?:(\d+):)?\s*error:\s*(.+)$"),
+              re.compile(r"^(app/src/main/res/[^:]+):(\d+):(?:(\d+):)?\s*error:\s*(.+)$"),
+          ]
+
+          combined_texts = []
+
+          for log_name, log_path in logs:
+              if not os.path.exists(log_path):
+                  continue
+              with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                  text = f.read()
+              combined_texts.append((log_name, text))
+
+              for pattern in task_patterns:
+                  matches = pattern.findall(text)
+                  if matches:
+                      task = matches[-1]
+
+              for raw_line in text.splitlines():
+                  line = raw_line.strip()
+                  if not line:
+                      continue
+                  if any(fragment in line for fragment in ignore_fragments):
+                      continue
+                  for pattern in source_patterns:
+                      m = pattern.match(line)
+                      if m:
+                          file_path = m.group(1)
+                          line_no = m.group(2)
+                          exact_error = m.group(4).strip()
+                          source_log = log_name
+                          break
+                  if source_log != "Unknown":
+                      break
+              if source_log != "Unknown":
                   break
 
-          lower = all_text.lower()
-          if "manifest" in lower or "androidmanifest.xml" in lower:
-              possible_cause = "manifest"
-          elif "compose" in lower or "@composable" in lower or "navigation-compose" in lower:
-              possible_cause = "compose"
-          elif "kotlin" in lower or ".kt:" in lower or "unresolved reference" in lower or "type mismatch" in lower:
-              possible_cause = "kotlin"
-          elif "dependency" in lower or "could not resolve" in lower or "could not determine the dependencies" in lower:
-              possible_cause = "dependency"
-          elif "sdk location not found" in lower or "android sdk" in lower:
-              possible_cause = "android sdk / environment"
+          all_text = "\n\n".join(text for _, text in combined_texts).lower()
+          if "manifest" in all_text or "androidmanifest.xml" in exact_error.lower() or "/res/" in file_path:
+              cause = "manifest/resources"
+          elif "@composable" in all_text or "compose" in all_text:
+              cause = "compose"
+          elif "unresolved reference" in exact_error.lower() or "type mismatch" in exact_error.lower() or file_path.endswith(".kt"):
+              cause = "kotlin"
+          elif "could not resolve" in all_text or "dependency" in all_text:
+              cause = "dependency"
+          elif "sdk location not found" in all_text:
+              cause = "android sdk / environment"
 
-          for name, text in combined:
-              if "FAILED" in text or "What went wrong" in text or "error:" in text.lower() or "e:" in text:
-                  source_log = name
-                  break
-
-          pathlib.Path("diagnostics").mkdir(parents=True, exist_ok=True)
-          with open("diagnostics/failure-summary.txt", "w", encoding="utf-8") as f:
-              f.write(f"Failing task: {failing_task}\n")
-              f.write(f"Module/file involved: {module_or_file}\n")
-              f.write(f"Reason: {reason}\n")
-              f.write(f"Possible cause: {possible_cause}\n")
+          pathlib.Path("ci-logs").mkdir(parents=True, exist_ok=True)
+          with open("ci-logs/first-real-error.txt", "w", encoding="utf-8") as f:
+              f.write(f"Failing task: {task}\n")
+              f.write(f"File: {file_path}\n")
+              f.write(f"Line: {line_no}\n")
+              f.write(f"Error: {exact_error}\n")
+              f.write(f"Likely cause: {cause}\n")
               f.write(f"Source log: {source_log}\n")
 
+          if file_path != "Unknown":
+              safe_message = exact_error.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f"::error file={file_path},line={line_no},title=Android CI source error::{safe_message}")
+
           summary = []
-          summary.append("## Android CI Summary")
+          summary.append("## Android CI First Real Error")
           summary.append("")
           summary.append(f"- Lint: {os.environ.get('LINT_OUTCOME', 'unknown')}")
           summary.append(f"- Unit tests: {os.environ.get('TEST_OUTCOME', 'unknown')}")
           summary.append(f"- Assemble debug: {os.environ.get('ASSEMBLE_OUTCOME', 'unknown')}")
           summary.append("")
-          summary.append("### Failure diagnostics")
-          summary.append(f"- Failing task: `{failing_task}`")
-          summary.append(f"- Module/file involved: `{module_or_file}`")
-          summary.append(f"- Possible cause: `{possible_cause}`")
-          summary.append(f"- Source log: `{source_log}`")
+          summary.append(f"- Failing task: `{task}`")
+          summary.append(f"- Exact file: `{file_path}`")
+          summary.append(f"- Line number: `{line_no}`")
+          summary.append(f"- Likely cause category: `{cause}`")
           summary.append("")
-          summary.append("### Why the build failed")
-          summary.append(reason)
+          summary.append("### Exact error")
+          summary.append(exact_error)
           summary.append("")
-          summary.append("### Where to look")
-          summary.append("- `ci-logs/*.log`")
-          summary.append("- `app/build/reports/`")
-          summary.append("- `build/reports/`")
+          summary.append("### Main debugging output")
+          summary.append("- `ci-logs/first-real-error.txt`")
+          summary.append("- `ci-logs/assemble-debug.log`")
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
               f.write("\n".join(summary) + "\n")
           PY
-        env:
-          LINT_OUTCOME: ${{ steps.lint.outcome }}
-          TEST_OUTCOME: ${{ steps.unit_tests.outcome }}
-          ASSEMBLE_OUTCOME: ${{ steps.assemble_debug.outcome }}
+
+      - name: Upload first real error artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-real-error
+          path: ci-logs/first-real-error.txt
+          if-no-files-found: warn
 
       - name: Upload APK artifact
         if: always()
@@ -192,7 +219,6 @@ jobs:
           name: gradle-logs
           path: |
             ci-logs/**
-            diagnostics/failure-summary.txt
           if-no-files-found: warn
 
       - name: Upload lint reports
@@ -228,5 +254,5 @@ jobs:
       - name: Fail workflow if any stage failed
         if: steps.lint.outcome != 'success' || steps.unit_tests.outcome != 'success' || steps.assemble_debug.outcome != 'success'
         run: |
-          echo "One or more Android CI stages failed. See job summary and uploaded artifacts."
+          echo "One or more Android CI stages failed. See first-real-error.txt, job summary, and uploaded artifacts."
           exit 1
