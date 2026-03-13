@@ -8,6 +8,8 @@ enum class ScreenRole {
     APP_LAUNCHER,
     SEARCH,
     FORM,
+    LIST,
+    DETAIL,
     TARGET_APP,
     UNKNOWN,
 }
@@ -20,16 +22,28 @@ object ScreenRoleDetector {
         if (observation.blockers.any { it.type == BlockerType.KEYBOARD_OBSTRUCTION }) return ScreenRole.KEYBOARD_VISIBLE
 
         val packageName = observation.packageName.orEmpty().lowercase()
-        if (targetPackageName != null && packageName == targetPackageName.lowercase()) return ScreenRole.TARGET_APP
-        if (packageName.contains("launcher") || packageName.contains("quickstep") || packageName.contains("miui.home")) return ScreenRole.HOME
-
-        val allText = observation.nodes.joinToString(" ") {
+        val textCorpus = observation.nodes.joinToString(" ") {
             listOfNotNull(it.text, it.contentDescription, it.className).joinToString(" ")
         }.lowercase()
+        val clickableCount = observation.nodes.count { it.clickable }
+        val editableCount = observation.nodes.count { it.editable }
+
+        if (targetPackageName != null && packageName == targetPackageName.lowercase()) {
+            return when {
+                editableCount > 0 -> ScreenRole.FORM
+                textCorpus.contains("search") -> ScreenRole.SEARCH
+                clickableCount >= 6 -> ScreenRole.LIST
+                clickableCount in 1..5 -> ScreenRole.DETAIL
+                else -> ScreenRole.TARGET_APP
+            }
+        }
+        if (packageName.contains("launcher") || packageName.contains("quickstep") || packageName.contains("miui.home")) return ScreenRole.HOME
 
         return when {
-            allText.contains("search") -> ScreenRole.SEARCH
-            observation.nodes.any { it.editable } -> ScreenRole.FORM
+            textCorpus.contains("search") -> ScreenRole.SEARCH
+            editableCount > 0 -> ScreenRole.FORM
+            clickableCount >= 8 -> ScreenRole.LIST
+            clickableCount in 1..7 -> ScreenRole.DETAIL
             packageName.contains("settings") || packageName.contains("launcher") -> ScreenRole.APP_LAUNCHER
             else -> ScreenRole.UNKNOWN
         }

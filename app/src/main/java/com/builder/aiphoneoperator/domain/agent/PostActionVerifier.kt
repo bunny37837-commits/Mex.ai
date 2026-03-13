@@ -1,8 +1,16 @@
 package com.builder.aiphoneoperator.domain.agent
 
 object PostActionVerifier {
-    fun verifyTap(before: ScreenObservation?, after: ScreenObservation?, target: GroundedTarget): VerificationResult {
+    fun verifyTap(
+        before: ScreenObservation?,
+        after: ScreenObservation?,
+        target: GroundedTarget,
+        expectedSignals: List<String> = emptyList(),
+    ): VerificationResult {
         if (before == null || after == null) return VerificationResult(VerificationOutcome.FAILURE, "Missing observation for verification.")
+        if (expectedSignals.isNotEmpty() && containsAny(after, expectedSignals)) {
+            return VerificationResult(VerificationOutcome.SUCCESS, "Expected screen signal appeared after tap.")
+        }
         if (before.packageName != after.packageName || before.className != after.className) {
             return VerificationResult(VerificationOutcome.SUCCESS, "Screen changed after tap.")
         }
@@ -28,10 +36,20 @@ object PostActionVerifier {
         if (after == null) return VerificationResult(VerificationOutcome.FAILURE, "Missing observation for verification.")
         val node = after.nodes.firstOrNull { it.id == target.id }
         val visibleText = listOfNotNull(node?.text, node?.contentDescription).joinToString(" ")
-        return if (visibleText.contains(expectedText, ignoreCase = false)) {
+        return if (visibleText.contains(expectedText, ignoreCase = false) || containsAny(after, listOf(expectedText))) {
             VerificationResult(VerificationOutcome.SUCCESS, "Text input verified.")
         } else {
             VerificationResult(VerificationOutcome.NO_EFFECT, "Expected text not visible after input.")
+        }
+    }
+
+    fun containsAny(observation: ScreenObservation, signals: List<String>): Boolean {
+        val corpus = observation.nodes.joinToString(" ") {
+            listOfNotNull(it.text, it.contentDescription, it.className).joinToString(" ")
+        }.lowercase()
+        return signals.any { signal ->
+            val normalized = signal.lowercase().trim()
+            normalized.isNotBlank() && corpus.contains(normalized)
         }
     }
 }

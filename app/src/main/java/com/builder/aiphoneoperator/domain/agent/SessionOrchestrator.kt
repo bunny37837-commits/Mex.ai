@@ -81,7 +81,7 @@ object SessionOrchestrator {
                     val executed = executeDeviceAction(decision.action)
                     delay(500)
                     val after = captureObservation()
-                    val verification = verify(decision.action, before, after)
+                    val verification = verify(decision.action, before, after, decision.expectedSignals)
                     if (executed && verification.outcome == VerificationOutcome.SUCCESS) {
                         if (decision.advanceStep) stepIndex += 1
                         retries = 0
@@ -113,9 +113,14 @@ object SessionOrchestrator {
         )
     }
 
-    private fun verify(action: DeviceAction, before: ScreenObservation?, after: ScreenObservation?): VerificationResult {
+    private fun verify(
+        action: DeviceAction,
+        before: ScreenObservation?,
+        after: ScreenObservation?,
+        expectedSignals: List<String> = emptyList(),
+    ): VerificationResult {
         return when (action) {
-            is DeviceAction.Tap -> PostActionVerifier.verifyTap(before, after, action.target)
+            is DeviceAction.Tap -> PostActionVerifier.verifyTap(before, after, action.target, expectedSignals)
             DeviceAction.Back -> PostActionVerifier.verifyBack(before, after)
             is DeviceAction.InputText -> PostActionVerifier.verifyInput(after, action.target, action.text)
         }
