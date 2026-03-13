@@ -18,6 +18,7 @@ import com.builder.aiphoneoperator.domain.agent.OpenAppExecutor
 import com.builder.aiphoneoperator.domain.agent.OpenAppResolver
 import com.builder.aiphoneoperator.domain.agent.PostActionVerifier
 import com.builder.aiphoneoperator.domain.agent.ScreenObservation
+import com.builder.aiphoneoperator.domain.agent.SessionOrchestrator
 import com.builder.aiphoneoperator.domain.status.AndroidOnboardingStatusChecker
 import com.builder.aiphoneoperator.domain.status.AndroidRepairStatusChecker
 import com.builder.aiphoneoperator.model.RequirementStatus
@@ -181,56 +182,27 @@ object OperatorRepository : AppStateRepository {
         AppRuntimeState.setActiveSession(created)
         persistRuntimeMetadata()
 
-        val parsing = created.copy(status = AgentSessionStatus.PARSING, message = "Parsing command…")
-        AppRuntimeState.setActiveSession(parsing)
+        scope.launch {
+            val parsing = created.copy(status = AgentSessionStatus.PARSING, message = "Parsing command…")
+            AppRuntimeState.setActiveSession(parsing)
 
-        val action = CommandParser.parse(AgentCommand(command))
-        if (action == null) {
-            val unsupported = parsing.copy(
-                status = AgentSessionStatus.UNSUPPORTED,
-                message = "This build currently supports only 'open app by name' commands.",
-            )
-            AppRuntimeState.archiveSession(unsupported)
-            persistRuntimeMetadata()
-            return
-        }
-
-        val resolved = when (action) {
-            is ExecutionAction.OpenApp -> OpenAppResolver.resolve(context, action.query)
-        }
-        if (resolved == null) {
-            val failed = parsing.copy(
-                status = AgentSessionStatus.FAILED,
-                action = action,
-                message = "Could not find an installed app matching '${action.query}'.",
-                error = "App resolution failed",
-            )
-            AppRuntimeState.archiveSession(failed)
-            persistRuntimeMetadata()
-            return
-        }
-
-        val resolvedSession = parsing.copy(
-            status = AgentSessionStatus.RESOLVED,
-            action = resolved,
-            message = "Resolved ${resolved.resolvedLabel ?: resolved.query}.",
-        )
-        AppRuntimeState.setActiveSession(resolvedSession)
-
-        val executing = resolvedSession.copy(status = AgentSessionStatus.EXECUTING, message = "Opening ${resolved.resolvedLabel ?: resolved.query}…")
-        AppRuntimeState.setActiveSession(executing)
-
-        when (val result = OpenAppExecutor.execute(context, resolved)) {
-            is ExecutionResult.Success -> {
-                val completed = executing.copy(status = AgentSessionStatus.COMPLETED, message = result.message)
-                AppRuntimeState.archiveSession(completed)
+            val action = CommandParser.parse(AgentCommand(command))
+            if (action == null) {
+                val unsupported = parsing.copy(
+                    status = AgentSessionStatus.UNSUPPORTED,
+                    message = "Could not turn that request into a navigable workflow.",
+                )
+                AppRuntimeState.archiveSession(unsupported)
+                persistRuntimeMetadata()
+                return@launch
             }
-            is ExecutionResult.Failure -> {
-                val failed = executing.copy(status = AgentSessionStatus.FAILED, message = result.reason, error = result.reason)
-                AppRuntimeState.archiveSession(failed)
+
+            when (action) {
+                is ExecutionAction.OpenApp -> executeOpenAppOnly(context, parsing, action)
+                is ExecutionAction.NavigateWorkflow -> executeWorkflow(context, parsing, action)
             }
+            persistRuntimeMetadata()
         }
-        persistRuntimeMetadata()
     }
 
     override fun pauseTask() {
@@ -246,6 +218,93 @@ object OperatorRepository : AppStateRepository {
     override fun cancelTask() {
         AppRuntimeState.cancelSession()
         persistRuntimeMetadata()
+    }
+
+    private suspend fun executeOpenAppOnly(context: Context, parsing: AgentSession, action: ExecutionAction.OpenApp) {
+        val resolved = OpenAppResolver.resolve(context, action.query)
+        if (resolved == null) {
+            val failed = parsing.copy(
+                status = AgentSessionStatus.FAILED,
+                action = action,
+                message = "Could not find an installed app matching '${action.query}'.",
+                error = "App resolution failed",
+            )
+            AppRuntimeState.archiveSession(failed)
+            return
+        }
+
+        val resolvedSession = parsing.copy(
+            status = AgentSessionStatus.RESOLVED,
+            action = resolved,
+            message = "Resolved ${resolved.resolvedLabel ?: resolved.query}.",
+            totalSteps = 1,
+        )
+        AppRuntimeState.setActiveSession(resolvedSession)
+
+        when (val result = OpenAppExecutor.execute(context, resolved)) {
+            is ExecutionResult.Success -> AppRuntimeState.archiveSession(
+                resolvedSession.copy(
+                    status = AgentSessionStatus.COMPLETED,
+                    message = result.message,
+                    currentStepIndex = 1,
+                )
+            )
+            is ExecutionResult.Failure -> AppRuntimeState.archiveSession(
+                resolvedSession.copy(
+                    status = AgentSessionStatus.FAILED,
+                    message = result.reason,
+                    error = result.reason,
+                )
+            )
+        }
+    }
+
+    private suspend fun executeWorkflow(context: Context, parsing: AgentSession, action: ExecutionAction.NavigateWorkflow) {
+        val resolvedPackage = action.appQuery?.let { OpenAppResolver.resolve(context, it) }
+        val resolved = action.copy(
+            resolvedPackageName = resolvedPackage?.resolvedPackageName,
+            resolvedLabel = resolvedPackage?.resolvedLabel,
+        )
+        val resolvedSession = parsing.copy(
+            status = AgentSessionStatus.RESOLVED,
+            action = resolved,
+            message = if (resolved.resolvedLabel != null) "Resolved ${resolved.resolvedLabel}." else "Workflow ready.",
+            totalSteps = resolved.steps.size,
+        )
+        AppRuntimeState.setActiveSession(resolvedSession)
+
+        val finalSession = SessionOrchestrator.run(
+            context = context,
+            workflow = resolved,
+            onUpdate = { status, message, stepIndex, totalSteps, retries, role ->
+                AppRuntimeState.updateActiveSession { session ->
+                    session?.copy(
+                        status = status,
+                        message = message,
+                        currentStepIndex = stepIndex,
+                        totalSteps = totalSteps,
+                        retries = retries,
+                        lastScreenRole = role,
+                    )
+                }
+            },
+            captureObservation = { captureObservation() },
+            executeDeviceAction = { actionToRun -> AccessibilityActionExecutor.execute(actionToRun) },
+            launchApp = { openAction -> OpenAppExecutor.execute(context, openAction) },
+        )
+
+        val current = appState.value.activeSession ?: resolvedSession
+        AppRuntimeState.archiveSession(
+            current.copy(
+                status = finalSession.status,
+                message = finalSession.message,
+                error = finalSession.error,
+                currentStepIndex = finalSession.currentStepIndex,
+                totalSteps = finalSession.totalSteps,
+                lastScreenRole = finalSession.lastScreenRole,
+                retries = finalSession.retries,
+            )
+        )
     }
 
     fun acknowledgeHyperOsAutostart() {

@@ -21,4 +21,8 @@ data class AgentSession(
     val action: ExecutionAction? = null,
     val message: String,
     val error: String? = null,
+    val currentStepIndex: Int = 0,
+    val totalSteps: Int = 0,
+    val lastScreenRole: String? = null,
+    val retries: Int = 0,
 )
