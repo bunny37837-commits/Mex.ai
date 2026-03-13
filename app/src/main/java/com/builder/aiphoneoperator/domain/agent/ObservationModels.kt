@@ -61,6 +61,7 @@ sealed interface DeviceAction {
 
 enum class VerificationOutcome {
     SUCCESS,
+    SETTLING,
     NO_EFFECT,
     WRONG_STATE,
     FAILURE,

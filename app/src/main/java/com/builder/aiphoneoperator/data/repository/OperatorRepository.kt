@@ -14,11 +14,15 @@ import com.builder.aiphoneoperator.domain.agent.CommandParser
 import com.builder.aiphoneoperator.domain.agent.DeviceAction
 import com.builder.aiphoneoperator.domain.agent.ExecutionAction
 import com.builder.aiphoneoperator.domain.agent.ExecutionResult
+import com.builder.aiphoneoperator.domain.agent.GroundedTarget
+import com.builder.aiphoneoperator.domain.agent.GroundingSource
 import com.builder.aiphoneoperator.domain.agent.OpenAppExecutor
 import com.builder.aiphoneoperator.domain.agent.OpenAppResolver
 import com.builder.aiphoneoperator.domain.agent.PostActionVerifier
 import com.builder.aiphoneoperator.domain.agent.ScreenObservation
 import com.builder.aiphoneoperator.domain.agent.SessionOrchestrator
+import com.builder.aiphoneoperator.domain.agent.TargetAffordance
+import com.builder.aiphoneoperator.domain.agent.VerificationOutcome
 import com.builder.aiphoneoperator.domain.status.AndroidOnboardingStatusChecker
 import com.builder.aiphoneoperator.domain.status.AndroidRepairStatusChecker
 import com.builder.aiphoneoperator.model.RequirementStatus
@@ -108,17 +112,12 @@ object OperatorRepository : AppStateRepository {
         val verification = PostActionVerifier.verifyTap(before, after, target)
         AppRuntimeState.updateActiveSession { session ->
             session?.copy(
-                status = when (verification.outcome) {
-                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS -> AgentSessionStatus.COMPLETED
-                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.NO_EFFECT -> AgentSessionStatus.FAILED
-                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.WRONG_STATE -> AgentSessionStatus.FAILED
-                    com.builder.aiphoneoperator.domain.agent.VerificationOutcome.FAILURE -> AgentSessionStatus.FAILED
-                },
+                status = verificationToStatus(verification.outcome),
                 message = verification.message,
                 error = if (executed) null else "Tap execution failed",
             )
         }
-        return executed && verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS
+        return executed && verification.outcome == VerificationOutcome.SUCCESS
     }
 
     override fun inputTextIntoFocusedField(text: String): Boolean {
@@ -127,12 +126,12 @@ object OperatorRepository : AppStateRepository {
             ?: before.nodes.firstOrNull { it.editable }
             ?: return false
         val target = AccessibilityGroundingEngine.findTarget(before, focused.text ?: focused.contentDescription ?: focused.id, requireEditable = true)
-            ?: com.builder.aiphoneoperator.domain.agent.GroundedTarget(
+            ?: GroundedTarget(
                 id = focused.id,
                 label = focused.text ?: focused.contentDescription ?: "focused field",
                 bounds = focused.bounds,
-                source = com.builder.aiphoneoperator.domain.agent.GroundingSource.ACCESSIBILITY,
-                affordances = setOf(com.builder.aiphoneoperator.domain.agent.TargetAffordance.INPUT_TEXT),
+                source = GroundingSource.ACCESSIBILITY,
+                affordances = setOf(TargetAffordance.INPUT_TEXT),
                 confidence = 0.95f,
             )
         AppRuntimeState.updateActiveSession { session ->
@@ -143,12 +142,12 @@ object OperatorRepository : AppStateRepository {
         val verification = PostActionVerifier.verifyInput(after, target, text)
         AppRuntimeState.updateActiveSession { session ->
             session?.copy(
-                status = if (verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS) AgentSessionStatus.COMPLETED else AgentSessionStatus.FAILED,
+                status = verificationToStatus(verification.outcome),
                 message = verification.message,
                 error = if (executed) null else "Text input execution failed",
             )
         }
-        return executed && verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS
+        return executed && verification.outcome == VerificationOutcome.SUCCESS
     }
 
     override fun performBack(): Boolean {
@@ -161,12 +160,12 @@ object OperatorRepository : AppStateRepository {
         val verification = PostActionVerifier.verifyBack(before, after)
         AppRuntimeState.updateActiveSession { session ->
             session?.copy(
-                status = if (verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS) AgentSessionStatus.COMPLETED else AgentSessionStatus.FAILED,
+                status = verificationToStatus(verification.outcome),
                 message = verification.message,
                 error = if (executed) null else "Back execution failed",
             )
         }
-        return executed && verification.outcome == com.builder.aiphoneoperator.domain.agent.VerificationOutcome.SUCCESS
+        return executed && verification.outcome == VerificationOutcome.SUCCESS
     }
 
     override fun submitCommand(command: String) {
@@ -378,5 +377,11 @@ object OperatorRepository : AppStateRepository {
                 debugModeEnabled = prefs.debugModeEnabled,
             )
         )
+    }
+
+    private fun verificationToStatus(outcome: VerificationOutcome): AgentSessionStatus = when (outcome) {
+        VerificationOutcome.SUCCESS -> AgentSessionStatus.COMPLETED
+        VerificationOutcome.SETTLING -> AgentSessionStatus.EXECUTING
+        VerificationOutcome.NO_EFFECT, VerificationOutcome.WRONG_STATE, VerificationOutcome.FAILURE -> AgentSessionStatus.FAILED
     }
 }
